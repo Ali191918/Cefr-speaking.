@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="uz"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CEFR Speaking Test</title>
+<style>
+:root{--bg:#f5f6fb;--cd:#fff;--tx:#1b1d29;--mu:#666b7d;--ac:#3b5bdb;--sf:#e8ecff;--bd:#e2e5ef;--rd:#d6336c}
+@media(prefers-color-scheme:dark){:root{--bg:#121420;--cd:#1c1f2e;--tx:#eceef7;--mu:#9aa0b5;--ac:#7c93ff;--sf:#262b45;--bd:#2c3150;--rd:#ff6b9a}}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,sans-serif}
+main{max-width:640px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:8px 0}h2{font-size:18px;margin:0 0 8px}.mu{color:var(--mu);font-size:14px}
+.cd{background:var(--cd);border:1px solid var(--bd);border-radius:14px;padding:16px;margin:12px 0}
+button{font:inherit;border:0;border-radius:12px;padding:12px 16px;background:var(--ac);color:#fff;width:100%;margin-top:8px}
+button.sec{background:var(--sf);color:var(--ac)}button:disabled{opacity:.5}button.rec{background:var(--rd)}
+input{font:inherit;width:100%;box-sizing:border-box;padding:12px;margin-top:8px;border-radius:12px;border:1px solid var(--bd);background:var(--bg);color:var(--tx)}
+.t{font-size:34px;text-align:center;font-variant-numeric:tabular-nums}
+.lv{font-size:44px;font-weight:700;color:var(--ac);text-align:center}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:8px}.g div{background:var(--sf);border-radius:10px;padding:8px;text-align:center}
+.hi{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bd);font-size:14px}
+</style></head>
+<body><main id="app"></main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+// 1) Supabase sozlamalarini shu yerga qo‘ying (Project Settings → API)
+const SUPABASE_URL="https://ppebekziopesutrewjge.supabase.co/rest/v1/";
+const SUPABASE_ANON_KEY="sb_publishable_QxawI4i5s3PfrwM2yFTi6A_kT3yHN7n";
+
+const PARTS=[
+{id:"1.1",t:"Part 1.1 · Shaxsiy savollar",sec:45,qs:["What do you usually do in your free time, and why do you enjoy it?","Tell me about the place where you grew up.","How do you prefer to learn new things: alone or with other people?"]},
+{id:"1.2",t:"Part 1.2 · Rasmlarni solishtirish",sec:60,qs:["Picture A shows students studying in a quiet library. Picture B shows students studying online at home. Compare the two situations and say which one you would choose.","Picture A shows a busy city market. Picture B shows a modern supermarket. Compare them and tell me where you prefer to shop."]},
+{id:"2",t:"Part 2 · Uzun javob",sec:120,qs:["Describe a teacher who influenced you. Say: who the person is, what they taught you, how you felt about their lessons, and why they were important.","Talk about a trip you remember well. Say: where you went, who you went with, what you did, and why it was memorable."]},
+{id:"3",t:"Part 3 · Fikr bildirish",sec:120,qs:["Some people think children should use smartphones from a young age. Others disagree. Give arguments for and against, then say what you think.","Some say working from home is better than working in an office. Discuss the advantages and disadvantages."]}
+];
+const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+const $=s=>document.querySelector(s),app=$("#app");
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const mmss=n=>Math.floor(n/60)+":"+String(n%60).padStart(2,"0");
+let part,q,left,timer,recording=false,wavB64=null,used=0;
+let ctx,src,proc,stream,chunks=[],inRate;
+
+sb.auth.onAuthStateChange((_e,s)=>s?home():authView());
+sb.auth.getSession().then(({data})=>data.session?home():authView());
+
+function authView(msg=""){
+  app.innerHTML=`<h1>CEFR Speaking Test</h1><p class="mu">Kirish yoki ro‘yxatdan o‘tish</p>
+  <div class="cd"><input id="em" type="email" placeholder="Email" autocomplete="email">
+  <input id="pw" type="password" placeholder="Parol (kamida 6 belgi)" autocomplete="current-password">
+  <button id="in">Kirish</button><button id="up" class="sec">Ro‘yxatdan o‘tish</button>
+  <p class="mu" id="msg">${esc(msg)}</p></div>`;
+  const say=m=>$("#msg").textContent=m;
+  $("#in").onclick=async()=>{const {error}=await sb.auth.signInWithPassword({email:$("#em").value.trim(),password:$("#pw").value});if(error)say("Xato: "+error.message)};
+  $("#up").onclick=async()=>{const {data,error}=await sb.auth.signUp({email:$("#em").value.trim(),password:$("#pw").value});
+    if(error)say("Xato: "+error.message);else if(!data.session)say("Emailingizga tasdiqlash xati yuborildi.")};
+}
+async function home(){
+  app.innerHTML=`<h1>CEFR Speaking Test</h1>
+  <div class="cd"><h2>Qismni tanlang</h2>${PARTS.map((p,i)=>`<button class="sec" data-i="${i}" style="text-align:left">${p.t}<br><span class="mu">${mmss(p.sec)} gacha</span></button>`).join("")}</div>
+  <div class="cd"><h2>Oxirgi natijalar</h2><div id="hs" class="mu">Yuklanmoqda…</div></div>
+  <button class="sec" id="out">Chiqish</button>`;
+  app.querySelectorAll("[data-i]").forEach(b=>b.onclick=()=>start(+b.dataset.i));
+  $("#out").onclick=()=>sb.auth.signOut();
+  const {data}=await sb.from("results").select("*").order("created_at",{ascending:false}).limit(10);
+  $("#hs").innerHTML=data&&data.length?data.map(h=>`<div class="hi"><span>${esc(h.part)} · ${new Date(h.created_at).toLocaleDateString()}</span><b>${esc(h.level)} · ${h.score}/75</b></div>`).join(""):"Hozircha natija yo‘q.";
+}
+function start(i){
+  part=PARTS[i];q=part.qs[Math.floor(Math.random()*part.qs.length)];left=part.sec;wavB64=null;
+  app.innerHTML=`<button class="sec" id="bk" style="width:auto">← Orqaga</button>
+  <div class="cd"><h2>${part.t}</h2><p>${esc(q)}</p></div>
+  <div class="cd"><div class="t" id="tm">${mmss(left)}</div>
+  <button id="mic">🎤 Yozishni boshlash</button>
+  <p class="mu" id="st">Tugmani bosing va ingliz tilida gapiring.</p>
+  <button id="go" disabled>Gemini bilan baholash</button></div>`;
+  $("#bk").onclick=()=>{if(recording)stopRec();home()};
+  $("#mic").onclick=()=>recording?stopRec():startRec();
+  $("#go").onclick=grade;
+}
+async function startRec(){
+  try{stream=await navigator.mediaDevices.getUserMedia({audio:true})}catch{return $("#st").textContent="Mikrofonga ruxsat bering."}
+  chunks=[];ctx=new (window.AudioContext||window.webkitAudioContext)();inRate=ctx.sampleRate;
+  src=ctx.createMediaStreamSource(stream);proc=ctx.createScriptProcessor(4096,1,1);
+  proc.onaudioprocess=e=>chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  src.connect(proc);proc.connect(ctx.destination);
+  recording=true;left=part.sec;wavB64=null;$("#go").disabled=true;
+  $("#mic").textContent="⏹ To‘xtatish";$("#mic").classList.add("rec");$("#st").textContent="Yozilmoqda…";
+  timer=setInterval(()=>{left--;$("#tm").textContent=mmss(Math.max(left,0));if(left<=0)stopRec()},1000);
+}
+async function stopRec(){
+  if(!recording)return;recording=false;clearInterval(timer);
+  used=part.sec-Math.max(left,0);
+  proc.disconnect();src.disconnect();stream.getTracks().forEach(t=>t.stop());ctx.close();
+  $("#mic").textContent="🎤 Qayta yozish";$("#mic").classList.remove("rec");
+  wavB64=await toWavB64();
+  $("#st").textContent=used<5?"Juda qisqa, qayta yozing.":"Yozib olindi ("+used+" soniya).";
+  $("#go").disabled=used<5;
+}
+function toWavB64(){
+  const R=11025,n=chunks.reduce((a,c)=>a+c.length,0),all=new Float32Array(n);let o=0;
+  chunks.forEach(c=>{all.set(c,o);o+=c.length});
+  const ratio=inRate/R,len=Math.floor(n/ratio),pcm=new Int16Array(len);
+  for(let i=0;i<len;i++){const s=Math.floor(i*ratio),e=Math.min(Math.floor((i+1)*ratio),n);let sum=0;
+    for(let j=s;j<e;j++)sum+=all[j];pcm[i]=Math.max(-1,Math.min(1,sum/Math.max(e-s,1)))*32767}
+  const h=new DataView(new ArrayBuffer(44)),w=(p,s)=>[...s].forEach((c,i)=>h.setUint8(p+i,c.charCodeAt(0)));
+  w(0,"RIFF");h.setUint32(4,36+len*2,true);w(8,"WAVEfmt ");h.setUint32(16,16,true);h.setUint16(20,1,true);h.setUint16(22,1,true);
+  h.setUint32(24,R,true);h.setUint32(28,R*2,true);h.setUint16(32,2,true);h.setUint16(34,16,true);w(36,"data");h.setUint32(40,len*2,true);
+  return new Promise(ok=>{const f=new FileReader();f.onload=()=>ok(f.result.split(",")[1]);f.readAsDataURL(new Blob([h,pcm],{type:"audio/wav"}))});
+}
+async function grade(){
+  const go=$("#go");go.disabled=true;go.textContent="Baholanmoqda…";
+  try{
+    const {data}=await sb.auth.getSession();
+    const r=await fetch("/api/grade",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+data.session.access_token},
+      body:JSON.stringify({audio:wavB64,part:part.t,question:q,seconds:used})});
+    const j=await r.json();if(!r.ok)throw new Error(j.error||"Xato");
+    result(j);
+    sb.from("results").insert({part:"Part "+part.id,level:j.level,score:j.score});
+  }catch(e){go.disabled=false;go.textContent="Gemini bilan baholash";$("#st").textContent="Xato: "+e.message}
+}
+function result(r){
+  app.innerHTML=`<div class="cd"><div class="mu" style="text-align:center">Sizning darajangiz</div><div class="lv">${esc(r.level)}</div><div class="mu" style="text-align:center">${esc(r.score)} / 75</div></div>
+  <div class="cd g"><div>Ravonlik<br><b>${esc(r.fluency)}/10</b></div><div>Lug‘at<br><b>${esc(r.vocabulary)}/10</b></div><div>Grammatika<br><b>${esc(r.grammar)}/10</b></div><div>Talaffuz<br><b>${esc(r.pronunciation)}/10</b></div></div>
+  <div class="cd"><h2>Xulosa</h2><p>${esc(r.summary)}</p><h2>Maslahatlar</h2>${(r.tips||[]).map(t=>`<p>• ${esc(t)}</p>`).join("")}</div>
+  <div class="cd"><h2>Siz aytgan matn</h2><p class="mu">${esc(r.transcript)}</p></div>
+  <button id="again">Bosh sahifa</button>`;
+  $("#again").onclick=home;
+}
+</script></body></html>
